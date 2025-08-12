@@ -282,17 +282,22 @@ if run:
                         if df is None or df.empty:
                             st.warning(f"{lbl} 沒有可用資料")
                             continue
-                        # 1) 轉成 mplfinance 喜歡的欄位名
+                        # === 在每個 tab 內，取代你原本的繪圖區塊 ===
+
+                        # 1) 轉成 mplfinance 期待的欄位名
                         dfp = df.copy()
                         dfp = dfp.rename(columns={
-                            "open":"Open", "high":"High", "low":"Low", "close":"Close", "volume":"Volume"
+                            "open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"
                         })
-
-                        # 2) 確保索引是 DatetimeIndex，且去掉時區
+                        # 2) 索引一定要是 DatetimeIndex（去掉時區）
                         dfp.index = pd.DatetimeIndex(dfp.index).tz_localize(None)
+                        # 3) Volume 缺值補 0（有些來源會是 NaN）
+                        if "Volume" not in dfp.columns:
+                            dfp["Volume"] = 0
+                        dfp["Volume"] = pd.to_numeric(dfp["Volume"], errors="coerce").fillna(0)
 
-                        # 3) 丟整個 dfp 給 mpf（不要再用子欄位切片）
-                        fig, ax = mpf.plot(
+                        # 4) 畫圖：回傳 (fig, axes)，axes 可能是 list/ndarray
+                        fig, axes = mpf.plot(
                             dfp,
                             type="candle",
                             style="charles",
@@ -305,9 +310,13 @@ if run:
                             figsize=(10, 4),
                         )
 
+                        # 5) 取得真正的 Axes 後再設標題
+                        ax = axes[0] if hasattr(axes, "__iter__") and not hasattr(axes, "set_title") else axes
                         ax.set_title(f"{lbl} 蠟燭圖", pad=6)
+
                         st.pyplot(fig, use_container_width=True)
                         plt.close(fig)
+
 
             # 決定指令
             if strategy == "短多 50–100p":
