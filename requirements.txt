@@ -3,6 +3,6 @@ pandas
 matplotlib
 mplfinance
 fredapi
-git+https://github.com/StreamAlpha/tvdatafeed.git
+tvdatafeed==1.0.9
 deep-translator
 requests
