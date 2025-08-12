@@ -3,6 +3,6 @@ pandas
 matplotlib
 mplfinance
 fredapi
-yfinance
 deep-translator
 requests
+tvdatafeed @ https://github.com/rongardF/tvdatafeed/archive/refs/heads/main.zip
