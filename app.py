@@ -282,12 +282,20 @@ if run:
                         if df is None or df.empty:
                             st.warning(f"{lbl} 沒有可用資料")
                             continue
-                        # 畫 K 線
+                        # 1) 轉成 mplfinance 喜歡的欄位名
+                        dfp = df.copy()
+                        dfp = dfp.rename(columns={
+                            "open":"Open", "high":"High", "low":"Low", "close":"Close", "volume":"Volume"
+                        })
+
+                        # 2) 確保索引是 DatetimeIndex，且去掉時區
+                        dfp.index = pd.DatetimeIndex(dfp.index).tz_localize(None)
+
+                        # 3) 丟整個 dfp 給 mpf（不要再用子欄位切片）
                         fig, ax = mpf.plot(
-                            df[["open", "high", "low", "close"]],
+                            dfp,
                             type="candle",
                             style="charles",
-                            mav=None,
                             volume=False,
                             datetime_format="%m-%d %H:%M",
                             show_nontrading=False,
@@ -296,6 +304,7 @@ if run:
                             returnfig=True,
                             figsize=(10, 4),
                         )
+
                         ax.set_title(f"{lbl} 蠟燭圖", pad=6)
                         st.pyplot(fig, use_container_width=True)
                         plt.close(fig)
