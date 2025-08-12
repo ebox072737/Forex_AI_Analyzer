@@ -1,0 +1,8 @@
+streamlit
+pandas
+matplotlib
+mplfinance
+fredapi
+git+https://github.com/StreamAlpha/tvdatafeed.git
+deep-translator
+requests
