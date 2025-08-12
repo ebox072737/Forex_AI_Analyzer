@@ -8,15 +8,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import mplfinance as mpf
 from fredapi import Fred
-
-# === 改動：可選載入 tvdatafeed，否則用 yfinance ===
-try:
-    from tvDatafeed import TvDatafeed, Interval
-    TV_OK = True
-except Exception:
-    TV_OK = False
-import yfinance as yf
-
+from tvdatafeed import TvDatafeed, Interval
 from deep_translator import GoogleTranslator
 
 # 🧱 字型設定（顯示中文與負號）
@@ -27,20 +19,12 @@ matplotlib.rcParams['axes.unicode_minus'] = False
 FRED_API_KEY = st.secrets.get("FRED_API_KEY", os.getenv("FRED_API_KEY", ""))
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", ""))
 
-# 🕒 時間框架（TV 與 YF 皆參考）
+# 🕒 時間框架
 TIMEFRAMES = {
-    "5min": "5m",
-    "15min": "15m",
-    "1h": "60m",
-    "4h": "240m",  # yfinance 沒 4h，下面會用 60m 重採樣
-}
-
-# yfinance interval 對照
-YF_INTERVAL = {
-    "5min": "5m",
-    "15min": "15m",
-    "1h": "60m",
-    "4h": "60m",   # 先抓 60m，再重採樣成 4H
+    "5min": Interval.in_5_minute,
+    "15min": Interval.in_15_minute,
+    "1h": Interval.in_1_hour,
+    "4h": Interval.in_4_hour,
 }
 
 # 🧮 指標對照
@@ -53,8 +37,8 @@ INDICATORS = {
     "Nonfarm Payrolls": "PAYEMS",
 }
 
-# 📥 初始化 tvDatafeed（匿名可用，但資料可能受限）
-tv = TvDatafeed() if TV_OK else None
+# 📥 初始化 tvdatafeed（匿名可用，但資料可能受限）
+tv = TvDatafeed()  # 不登入
 
 
 # ========= 資料抓取 =========
@@ -70,74 +54,39 @@ def fetch_macro_data():
         return f"❌ 總經資料抓取失敗: {e}"
 
 
-def _yf_symbol(symbol: str) -> str:
-    # Yahoo 的現貨常見代碼：XAUUSD=X、EURUSD=X… 若已帶 =X 就原樣
-    return symbol if symbol.endswith("=X") else (symbol + "=X")
-
-
 def fetch_candles(symbol="XAUUSD", label="15min", limit=100):
     try:
-        if TV_OK and tv is not None:
-            # === TradingView 路線 ===
-            interval_map = {
-                "5min": Interval.in_5_minute,
-                "15min": Interval.in_15_minute,
-                "1h": Interval.in_1_hour,
-                "4h": Interval.in_4_hour,
-            }
-            df = tv.get_hist(
-                symbol=symbol,
-                exchange="OANDA",
-                interval=interval_map[label],
-                n_bars=limit,
-            )
-            if df is None or df.empty:
-                raise Exception("無法取得資料 (tvdatafeed)")
-            df = df.reset_index().rename(columns={"date": "datetime"})
-        else:
-            # === yfinance 路線 ===
-            yf_symbol = _yf_symbol(symbol)
-            yf_interval = YF_INTERVAL[label]
-            # minute 級別需要較短 period；這裡用 7d，足夠取到 100 根 5m/15m/60m
-            period = "7d"
-            df = yf.download(yf_symbol, interval=yf_interval, period=period, progress=False)
-            if df is None or df.empty:
-                raise Exception("無法取得資料 (yfinance)")
-            df = df.tail(limit)
-            df = df.reset_index().rename(columns={
-                "Datetime": "datetime", "Date": "datetime",
-                "Open": "open", "High": "high", "Low": "low",
-                "Close": "close", "Volume": "volume"
-            })
-            # 4H 以 60m 重採樣
-            if label == "4h":
-                df["datetime"] = pd.to_datetime(df["datetime"])
-                df = (df.set_index("datetime")
-                        .resample("4H")
-                        .agg({"open":"first","high":"max","low":"min","close":"last","volume":"sum"})
-                        .dropna()
-                        .reset_index())
+        df = tv.get_hist(
+            symbol=symbol,
+            exchange="OANDA",
+            interval=TIMEFRAMES[label],
+            n_bars=limit,
+        )
+        if df is None or df.empty:
+            raise Exception("無法取得資料")
 
-        # 共用清理
+        df = df.reset_index().rename(columns={"date": "datetime"})
         df["datetime"] = pd.to_datetime(df["datetime"])
-        # 有些來源 volume 可能缺，先補 0
-        if "volume" not in df.columns:
-            df["volume"] = 0
         df["volume"] = pd.to_numeric(df["volume"], errors="coerce").fillna(0)
 
-        # 過濾週末
+        # 過濾週末與零量
         df = df[df["datetime"].dt.weekday < 5]
+        df = df[df["volume"] > 0]
 
-        # 給 prompt
+        # 格式化給 prompt
         df_fmt = df.copy()
         df_fmt["datetime"] = df_fmt["datetime"].dt.strftime("%Y-%m-%d %H:%M")
-        candles_for_prompt = df_fmt[["datetime", "open", "high", "low", "close", "volume"]].to_dict(orient="records")
+        candles_for_prompt = df_fmt[
+            ["datetime", "open", "high", "low", "close", "volume"]
+        ].to_dict(orient="records")
 
-        # 給圖表
-        df = df.set_index(pd.to_datetime(df["datetime"]))
-        df[["open", "high", "low", "close"]] = df[["open", "high", "low", "close"]].astype(float)
+        # 圖表用索引
+        df = df.set_index("datetime")
+        df[["open", "high", "low", "close"]] = df[
+            ["open", "high", "low", "close"]
+        ].astype(float)
 
-        return candles_for_prompt, df[["open", "high", "low", "close", "volume"]]
+        return candles_for_prompt, df
     except Exception as e:
         return f"❌ {label} K 線抓取失敗: {e}", None
 
@@ -146,16 +95,16 @@ def fetch_candles(symbol="XAUUSD", label="15min", limit=100):
 def builtin_long_prompt(symbol: str) -> str:
     return (
         "Act as a short-term forex analyst. Based on the provided macroeconomic data "
-        f"and multi-timeframe candlestick charts, analyze the current market condition of {symbol} on the 5-minute timeframe.\n\n"
-        "I am looking for a potential short-term long (buy) trade setup, targeting a profit of 50–100 pips.\n\n"
+        f"and multi-timeframe candlestick charts, analyze the current market condition of {symbol} on the 5-minute timeframe.\\n\\n"
+        "I am looking for a potential short-term long (buy) trade setup, targeting a profit of 50–100 pips.\\n\\n"
         "However, do not conclude that the market is bullish or that it is the right entry point just because I am looking for a buy setup. "
-        "Provide your independent professional judgment. If the market is not favorable for a long position, explain why.\n\n"
-        "Please include:\n"
-        "1. Current market bias: bullish or bearish?\n"
-        "2. Trade direction: buy or sell?\n"
-        "3. Suggested entry price\n"
-        "4. Take profit (TP) level — target 50–100 pips above entry\n"
-        "5. Stop loss (SL) level\n"
+        "Provide your independent professional judgment. If the market is not favorable for a long position, explain why.\\n\\n"
+        "Please include:\\n"
+        "1. Current market bias: bullish or bearish?\\n"
+        "2. Trade direction: buy or sell?\\n"
+        "3. Suggested entry price\\n"
+        "4. Take profit (TP) level — target 50–100 pips above entry\\n"
+        "5. Stop loss (SL) level\\n"
         "6. Reasoning: key technical factors (support/resistance, candlestick patterns, momentum) and relevant macro influences."
     )
 
@@ -163,16 +112,16 @@ def builtin_long_prompt(symbol: str) -> str:
 def builtin_short_prompt(symbol: str) -> str:
     return (
         "Act as a short-term forex analyst. Based on the provided macroeconomic data "
-        f"and multi-timeframe candlestick charts, analyze the current market condition of {symbol} on the 5-minute timeframe.\n\n"
-        "I am looking for a potential short-term short (sell) trade setup, targeting a profit of 50–100 pips.\n\n"
+        f"and multi-timeframe candlestick charts, analyze the current market condition of {symbol} on the 5-minute timeframe.\\n\\n"
+        "I am looking for a potential short-term short (sell) trade setup, targeting a profit of 50–100 pips.\\n\\n"
         "However, do not conclude that the market is bearish or that it is the right entry point just because I am looking for a sell setup. "
-        "Provide your independent professional judgment. If the market is not favorable for a short position, explain why.\n\n"
-        "Please include:\n"
-        "1. Current market bias: bullish or bearish?\n"
-        "2. Trade direction: buy or sell?\n"
-        "3. Suggested entry price\n"
-        "4. Take profit (TP) level — target 50–100 pips below entry\n"
-        "5. Stop loss (SL) level\n"
+        "Provide your independent professional judgment. If the market is not favorable for a short position, explain why.\\n\\n"
+        "Please include:\\n"
+        "1. Current market bias: bullish or bearish?\\n"
+        "2. Trade direction: buy or sell?\\n"
+        "3. Suggested entry price\\n"
+        "4. Take profit (TP) level — target 50–100 pips below entry\\n"
+        "5. Stop loss (SL) level\\n"
         "6. Reasoning: key technical factors (resistance, candlestick patterns, momentum) and relevant macro influences."
     )
 
@@ -182,10 +131,10 @@ def make_prompt(macro_data: dict, kline_dict_for_prompt: dict, user_instruction:
     summary = ""
     for tf, records in kline_dict_for_prompt.items():
         if isinstance(records, str):
-            summary += f"[{tf}] 抓取失敗\n"
+            summary += f"[{tf}] 抓取失敗\\n"
             continue
         max_bars = max_candle_config.get(tf, 20)
-        summary += f"\n[{tf}] 最近 {max_bars} 根K線：\n"
+        summary += f"\\n[{tf}] 最近 {max_bars} 根K線：\\n"
         for c in records[-max_bars:]:
             summary += (
                 f"{c['datetime']} | "
@@ -193,7 +142,7 @@ def make_prompt(macro_data: dict, kline_dict_for_prompt: dict, user_instruction:
                 f"H: {float(c['high']):.2f}, "
                 f"L: {float(c['low']):.2f}, "
                 f"C: {float(c['close']):.2f}, "
-                f"V: {float(c['volume']):.0f}\n"
+                f"V: {float(c['volume']):.0f}\\n"
             )
 
     prompt = f"""
@@ -315,12 +264,14 @@ if run:
         else:
             with chart_col:
                 st.success("✅ K 線抓取完成")
+                # 用 Tabs 顯示各時間框
                 tabs = st.tabs(list(k_for_plot.keys()))
                 for (lbl, df), tab in zip(k_for_plot.items(), tabs):
                     with tab:
                         if df is None or df.empty:
                             st.warning(f"{lbl} 沒有可用資料")
                             continue
+                        # 畫 K 線
                         fig, ax = mpf.plot(
                             df[["open", "high", "low", "close"]],
                             type="candle",
@@ -338,6 +289,7 @@ if run:
                         st.pyplot(fig, use_container_width=True)
                         plt.close(fig)
 
+            # 決定指令
             if strategy == "短多 50–100p":
                 instruction = builtin_long_prompt(symbol)
             elif strategy == "短空 50–100p":
@@ -345,6 +297,7 @@ if run:
             else:
                 instruction = custom_prompt.strip() or builtin_long_prompt(symbol)
 
+            # 組 prompt & 呼叫 AI
             prompt = make_prompt(macro, k_for_prompt, instruction, symbol)
             with st.spinner("呼叫 AI 分析中…"):
                 ai_text = analyze_with_groq(prompt)
