@@ -8,7 +8,18 @@ import matplotlib
 import matplotlib.pyplot as plt
 import mplfinance as mpf
 from fredapi import Fred
-from tvdatafeed import TvDatafeed, Interval
+# === 只用 tvdatafeed；相容大小寫命名，並提供本地 vendor 後備 ===
+import sys, pathlib
+try:
+    from tvDatafeed import TvDatafeed, Interval    # 大寫 D 版本
+except Exception:
+    try:
+        from tvdatafeed import TvDatafeed, Interval  # 小寫版本
+    except Exception:
+        # 如果雲端還是裝不到，走本地 vendor 後備（見步驟 3）
+        vendor_path = pathlib.Path(__file__).parent / "vendor"
+        sys.path.append(str(vendor_path))
+        from tvdatafeed import TvDatafeed, Interval
 from deep_translator import GoogleTranslator
 
 # 🧱 字型設定（顯示中文與負號）
