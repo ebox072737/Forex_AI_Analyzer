@@ -3,6 +3,6 @@ pandas
 matplotlib
 mplfinance
 fredapi
-tvdatafeed==1.0.9
+yfinance
 deep-translator
 requests
