@@ -107,7 +107,7 @@ def builtin_long_prompt(symbol: str) -> str:
     return (
         "Act as a short-term forex analyst. Based on the provided macroeconomic data "
         f"and multi-timeframe candlestick charts, analyze the current market condition of {symbol} on the 5-minute timeframe.\\n\\n"
-        "I am looking for a potential short-term long (buy) trade setup, targeting a profit of 5–10 pips.\\n\\n"
+        "I am looking for a potential short-term long (buy) trade setup, targeting a profit of 5–10 pips(0.5 ~ 1.0).\\n\\n"
         "However, do not conclude that the market is bullish or now it is the right entry point just because I am looking for a buy setup. "
         "Provide your independent professional judgment. If the market is not favorable for a long position, explain why.\\n\\n"
         "Please include:\\n"
@@ -124,7 +124,7 @@ def builtin_short_prompt(symbol: str) -> str:
     return (
         "Act as a short-term forex analyst. Based on the provided macroeconomic data "
         f"and multi-timeframe candlestick charts, analyze the current market condition of {symbol} on the 5-minute timeframe.\\n\\n"
-        "I am looking for a potential short-term short (sell) trade setup, targeting a profit of 5–10 pips.\\n\\n"
+        "I am looking for a potential short-term short (sell) trade setup, targeting a profit of 5–10 pips(0.5 ~ 1.0).\\n\\n"
         "However, do not conclude that the market is bearish or now it is the right entry point just because I am looking for a sell setup. "
         "Provide your independent professional judgment. If the market is not favorable for a short position, explain why.\\n\\n"
         "Please include:\\n"
