@@ -183,7 +183,8 @@ def analyze_with_groq(prompt: str, max_retries=3, backoff_factor=2):
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
 
     # 先用原模型，失敗時嘗試回退一個替代名稱
-    model_candidates = ["llama3-70b-8192", "llama-3.1-70b-versatile"]
+    model_candidates = ["llama3-70b-8192", "llama-3.3-70b-versatile"]
+
 
     last_error = None
     for model_name in model_candidates:
