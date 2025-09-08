@@ -178,29 +178,48 @@ def make_prompt(macro_data: dict, kline_dict_for_prompt: dict, user_instruction:
 def analyze_with_groq(prompt: str, max_retries=3, backoff_factor=2):
     if not GROQ_API_KEY:
         return "❌ AI 分析錯誤: 缺少 GROQ_API_KEY（請在 Streamlit secrets 設定）。"
+
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-    payload = {
-        "model": "llama3-70b-8192",
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.7,
-    }
-    for attempt in range(1, max_retries + 1):
-        try:
-            res = requests.post(url, headers=headers, json=payload, timeout=90)
-            res.raise_for_status()
-            return res.json()["choices"][0]["message"]["content"]
-        except requests.exceptions.HTTPError as e:
-            status = getattr(e.response, "status_code", None)
-            if status == 429 and attempt < max_retries:
-                wait = backoff_factor ** (attempt - 1)
-                time.sleep(wait)
-                continue
-            if status == 429:
-                return "❌ AI 分析錯誤: 請求過於頻繁，稍後再試。"
-            return f"❌ AI 分析錯誤: {e}"
-        except Exception as e:
-            return f"❌ AI 分析錯誤: {e}"
+
+    # 先用原模型，失敗時嘗試回退一個替代名稱
+    model_candidates = ["llama3-70b-8192", "llama-3.1-70b-versatile"]
+
+    last_error = None
+    for model_name in model_candidates:
+        payload = {
+            "model": model_name,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.7,
+            "max_tokens": 1024  # 明確指定，避免 400 / token 邊界
+        }
+        for attempt in range(1, max_retries + 1):
+            try:
+                res = requests.post(url, headers=headers, json=payload, timeout=90)
+                if res.status_code >= 400:
+                    # 把 Groq 的錯誤本文打出來，常會直接說明是什麼欄位不對
+                    try:
+                        detail = res.text
+                    except Exception:
+                        detail = "<no body>"
+                    last_error = f"HTTP {res.status_code} | model={model_name} | {detail}"
+                    # 429 重試
+                    if res.status_code == 429 and attempt < max_retries:
+                        wait = backoff_factor ** (attempt - 1)
+                        time.sleep(wait)
+                        continue
+                    # 其它 4xx/5xx 不重試（或你想要可自行放行）
+                    break
+                data = res.json()
+                return data["choices"][0]["message"]["content"]
+            except Exception as e:
+                last_error = f"{type(e).__name__}: {e}"
+                break  # 連線層錯誤通常換模型也沒用，直接跳出
+
+        # 若此模型一路失敗，改試下一個候選模型
+        continue
+
+    return f"❌ AI 分析錯誤：{last_error or '未知錯誤'}"
 
 
 def translate_to_zh(text: str):
